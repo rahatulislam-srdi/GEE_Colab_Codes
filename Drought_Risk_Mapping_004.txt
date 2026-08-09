@@ -1,0 +1,155 @@
+!pip install --upgrade --pre xee
+!pip install -U geemap
+
+import ee
+
+ee.Authenticate()
+ee.Initialize(
+    project = 'ee-rahat5151',
+    opt_url = 'https://earthengine-highvolume.googleapis.com'
+)
+
+
+
+import geemap
+
+Sylhet_Division= (
+    ee.FeatureCollection('projects/ee-rahat5151/assets/Sylhet_Division')
+)
+
+
+map = geemap.Map()
+map
+
+map.addLayer(Sylhet_Division)
+
+
+roi = Sylhet_Divisionr.geometry()
+roi
+
+
+water_mask = (
+    ee.ImageCollection("MODIS/061/MCD12Q1")
+    .mode().select('LC_Type1').eq(17).Not()
+)
+
+
+collection = (
+    ee.ImageCollection("IDAHO_EPSCOR/TERRACLIMATE")
+    .filterDate('2000','2025')
+    .select('aet', 'pr', 'soil', 'tmmn', 'tmmx', 'pdsi')
+    .map(
+        lambda x: x.updateMask(water_mask).clip(roi).copyProperties(x, ['system:time_start'])
+    )
+)
+
+collection
+
+
+import xarray as xr
+from xee import helpers
+from shapely.geometry import shape
+
+
+grid_params= helpers.fit_geometry(
+    grid_crs = 'EPSG:4326',
+    grid_scale = (0.05, -0.05),
+    geometry  = shape(roi.getInfo())
+)
+
+
+ds = xr.open_dataset(
+    collection,
+    engine = 'ee',
+    **grid_params
+
+)
+ds
+
+ds = ds.sortby('time')*1
+ds
+
+df= ds.to_dataframe().dropna()
+
+x = df[['aet','pr','soil','tmmn','tmmx']]
+x
+
+df['drought'] = ((df['pdsi']*.01)<-2.0).astype(int)
+df
+
+
+y = df['drought']
+y
+
+
+x_train, x_test, y_train, y_test = train_test_split(
+    x, y, test_size = 0.2, random_state = 42
+)
+
+from sklearn.ensemble import RandomForestClassifier
+model = RandomForestClassifier(n_estimators=200,random_state = 42)
+model.fit(x_train,y_train)
+
+
+
+y_prob = model.predict_proba(x_test)[:,1]
+from sklearn.metrics import roc_auc_score
+
+
+test = roc_auc_score(y_test, y_prob)
+test
+
+
+df['risk'] = model.predict_proba(x)[:,1]
+df
+
+
+
+dx= df.to_xarray().sortby(['time','y','x'])
+dx
+
+
+risk_map = dx.risk.mean(dim = 'time')
+
+
+
+yearly_risk = dx.risk.groupby('time.year').mean(dim='time')
+
+
+risk_map.plot(
+    x = 'x', y = 'y', robust = True
+)
+
+
+vec = geemap.ee_to_gdf(Cumilla_SD)
+vec
+
+
+!pip install rioxarray
+
+
+import rioxarray
+import geopandas as pgd
+import matplotlib.pyplot as plt
+
+
+vec.crs
+vec.geometry
+
+
+risk_map
+
+print(dx.rio.crs)
+
+
+print(vec.crs)
+
+
+yearly_risk.plot(
+    col='year',
+    col_wrap=4,
+    figsize=(12,16)
+)
+plt.savefig('yearly_risk.png',dpi=360, bbox_inches = 'tight')
+
+print(dx.time)
