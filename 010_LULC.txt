@@ -1,0 +1,97 @@
+var geometry: Table projects/ee-rahat5151/assets/Habiganj_Sadar
+var settlement: FeatureCollection (100 elements)
+var water: FeatureCollection (100 elements)
+var vegetation: FeatureCollection (100 elements)
+var bare: FeatureCollection (100 elements)
+
+
+Map.centerObject(geometry);
+var S2 = ee.ImageCollection("ee.ImageCollection("COPERNICUS/S2_HARMONIZED")")
+var cloud_remove = function(img){
+  var qa = img.select('QA60')
+  
+  var cloudBitMask = 0 << 10
+  var cirrusBitMask = 0 << 11
+  
+  var mask = qa.bitwiseAnd(cloudBitMask).eq(0).and(qa.bitwiseAnd(cirrusBitMask).eq(0))
+  return img.updateMask(mask)
+};
+
+var sentinel = S2
+.filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE',30))
+.filter(ee.Filter.date('2024-11-01','2024-12-01'))
+.filter(ee.Filter.bounds(geometry))
+.map(cloud_remove)
+.median()
+.clip(geometry)
+.select('B.*');
+
+Map.centerObject(geometry,12)
+// Map.addLayer(sentinel);
+
+var marged = settlement.merge(water).merge(bare).merge(vegetation)
+var bands = ['B1','B2','B3','B4','B5','B6','B7','B8','B9','B10','B11','B12','B8A']
+
+var marged = marged.randomColumn();
+
+var train_set = marged.filter(ee.Filter.lt('random',0.8))
+var test_set = marged.filter(ee.Filter.gte('random',0.8));
+
+print(train_set)
+print(test_set)
+
+var training = sentinel.select(bands).sampleRegions({
+  collection: train_set,
+  properties: ['landcover'],
+  scale:10
+});
+
+print(training)
+var classifier = ee.Classifier.smileRandomForest(160).train({
+  features: training,
+  classProperty:'landcover',
+  inputProperties: sentinel.bandNames()
+});
+
+var classified = sentinel.classify(classifier);
+// Map.addLayer(classified.clip(geometry),{min:0, max:3},'Rahat');
+
+var test = classified.sampleRegions({
+  collection: test_set,
+  properties: ['landcover'],
+  scale:10,
+});
+
+print(test);
+
+
+var testConfusionMatrix = test.errorMatrix('landcover','classification')
+print(testConfusionMatrix);
+print(testConfusionMatrix.accuracy());
+
+var validation = sentinel.select(bands).sampleRegions({
+  collection: test_set,
+  properties: ['landcover'],
+  scale:10,
+});
+test = validation.classify(classifier);
+
+var testConfusion = test.errorMatrix('landcover','classification')
+print('confusion',testConfusion);
+print('Accuracy',testConfusion.accuracy());
+print('test Kappa: ', testConfusion.kappa());
+
+var vegetation = classified.eq(0);
+
+Map.addLayer(vegetation);
+
+var areaImg = vegetation.multiply(ee.Image.pixelArea());
+
+var area = areaImg.reduceRegion({
+  reducer: ee.Reducer.sum(),
+  geometry: geometry.geometry(),
+  scale: 10,
+});
+
+var vegArea = ee.Number(area.get('classification')).divide(1e6).round();
+print('area',vegArea);
