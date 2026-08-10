@@ -1,0 +1,95 @@
+var roi: Table projects/ee-rahat5151/assets/Habiganj_Sadar
+
+Map.centerObject(roi, 10);
+Map.addLayer(roi, {}, "Study Area (ROI)", false);
+
+function scaleLandsat(img){
+  var bands = img.select('SR_B.*').multiply(0.0000275).add(-0.2);
+  return img.addBands(bands, null, true);
+}
+
+var ls1993 = ee.ImageCollection("LANDSAT/LT05/C02/T1_L2")
+  .filterDate('1993-08-01', '1993-12-31')
+  .filterBounds(roi)
+  .filter(ee.Filter.lt('CLOUD_COVER', 45))
+  .median();
+ls1993 = scaleLandsat(ls1993);
+
+var ls2023 = ee.ImageCollection("LANDSAT/LC08/C02/T1_L2")
+  .filterDate('2023-08-01', '2023-12-31')
+  .filterBounds(roi)
+  .filter(ee.Filter.lt('CLOUD_COVER', 45))
+  .median();
+ls2023 = scaleLandsat(ls2023);
+
+var mndwi93 = ls1993.normalizedDifference(['SR_B2', 'SR_B5']).rename('MNDWI_1993').clip(roi);
+var wiw93   = ls1993.select('SR_B4').lte(0.1558)
+                .and(ls1993.select('SR_B5').lte(0.0871))
+                .rename('WIW_1993').clip(roi);
+
+
+var mndwi23 = ls2023.normalizedDifference(['SR_B3', 'SR_B6']).rename('MNDWI_2023').clip(roi);
+var wiw23   = ls2023.select('SR_B5').lte(0.1735)
+                .and(ls2023.select('SR_B6').lte(0.1035))
+                .rename('WIW_2023').clip(roi);
+
+var mndwiChange = mndwi23.subtract(mndwi93).rename('MNDWI_Change');
+var wiwChange   = wiw23.unmask(0).subtract(wiw93.unmask(0)).rename('WIW_Change');
+
+
+var mndwiParams = {min: -1, max: 1, palette: ['purple', 'white', 'cyan', 'blue']};
+
+
+Map.addLayer(mndwi93, mndwiParams, 'MNDWI 1993');
+Map.addLayer(mndwi23, mndwiParams, 'MNDWI 2023');
+
+
+Map.addLayer(wiw93.updateMask(wiw93), {palette: ['blue']}, 'WIW Water 1993');
+Map.addLayer(wiw23.updateMask(wiw23), {palette: ['cyan']}, 'WIW Water 2023');
+
+
+Map.addLayer(mndwiChange, {min: -1, max: 1, palette: ['red', 'white', 'green']}, 'MNDWI Change');
+Map.addLayer(wiwChange.updateMask(wiwChange.neq(0)), {min: -1, max: 1, palette: ['red', 'green']}, 'WIW Change (Red: Lost, Green: Gained)');
+
+
+var areaImage = ee.Image.pixelArea().divide(1e6);
+
+
+function calculateDetailedMNDWI(indexImg, year) {
+  var deep = indexImg.gt(0.3);
+  var shallow = indexImg.gt(0).and(indexImg.lte(0.3));
+  var bare = indexImg.lte(0);
+  
+  var deepArea = areaImage.updateMask(deep).reduceRegion({
+    reducer: ee.Reducer.sum(), geometry: roi, scale: 30, maxPixels: 1e13
+  }).get('area');
+  var shallowArea = areaImage.updateMask(shallow).reduceRegion({
+    reducer: ee.Reducer.sum(), geometry: roi, scale: 30, maxPixels: 1e13
+  }).get('area');
+  var bareArea = areaImage.updateMask(bare).reduceRegion({
+    reducer: ee.Reducer.sum(), geometry: roi, scale: 30, maxPixels: 1e13
+  }).get('area');
+
+  print(year + ' MNDWI Breakdown (Sq. Km):', {
+    'Deep Water (>0.3)': deepArea,
+    'Shallow Water (0 to 0.3)': shallowArea,
+    'Bare Land / Non-Water (<=0)': bareArea
+  });
+}
+
+
+function calculateWIWArea(wiwImg, year) {
+  var totalArea = areaImage.updateMask(wiwImg).reduceRegion({
+    reducer: ee.Reducer.sum(), geometry: roi, scale: 30, maxPixels: 1e13
+  }).get('area');
+  
+  print(year + ' WIW Total Water Area (Sq. Km):', totalArea);
+}
+
+
+calculateDetailedMNDWI(mndwi93, '1993');
+calculateDetailedMNDWI(mndwi23, '2023');
+
+calculateWIWArea(wiw93, '1993');
+calculateWIWArea(wiw23, '2023');
+
