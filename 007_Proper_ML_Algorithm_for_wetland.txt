@@ -1,0 +1,105 @@
+var roi: Table projects/ee-rahat5151/assets/Habiganj_Sadar
+
+Map.centerObject(roi, 10);
+Map.addLayer(roi, {}, "ROI");
+
+
+function scaleLandsat(img){
+  return img.multiply(2.75e-05).add(-0.2);
+}
+
+
+var ls1993 = ee.ImageCollection("LANDSAT/LT05/C02/T1_L2")
+  .filterDate('1993-08-01', '1993-12-31')
+  .filterBounds(roi)
+  .filter(ee.Filter.lt('CLOUD_COVER', 45))
+  .median();
+
+ls1993 = scaleLandsat(ls1993);
+
+var mndwi93 = ls1993.normalizedDifference(['SR_B2','SR_B5']).rename('MNDWI');
+var wiw93   = ls1993.select('SR_B4').lte(0.1558)
+                  .and(ls1993.select('SR_B5').lte(0.0871))
+                  .rename('WIW');
+
+
+var ls2023 = ee.ImageCollection("LANDSAT/LC08/C02/T1_L2")
+  .filterDate('2023-08-01', '2023-12-31')
+  .filterBounds(roi)
+  .filter(ee.Filter.lt('CLOUD_COVER', 45))
+  .median();
+
+ls2023 = scaleLandsat(ls2023);
+
+var mndwi23 = ls2023.normalizedDifference(['SR_B3','SR_B6']).rename('MNDWI');
+var wiw23   = ls2023.select('SR_B5').lte(0.1735)
+                  .and(ls2023.select('SR_B6').lte(0.1035))
+                  .rename('WIW');
+
+
+var mndwiClass93 = mndwi93.gt(0).rename('class');
+var wiwClass93   = wiw93.rename('class');
+
+var mndwiClass23 = mndwi23.gt(0).rename('class');
+var wiwClass23   = wiw23.rename('class');
+
+
+function runML(image, classImg, bands, year, indexName) {
+
+  var stack = image.select(bands).addBands(classImg);
+
+  var samples = stack.sample({
+    region: roi,
+    scale: 30,
+    numPixels: 6000,
+    seed: 1
+  });
+
+ 
+  var withRandom = samples.randomColumn('random');
+  var trainSet = withRandom.filter('random < 0.7');
+  var testSet  = withRandom.filter('random >= 0.7');
+
+ 
+  var cart = ee.Classifier.smileCart().train(trainSet, 'class', bands);
+  var cartMap = image.select(bands).classify(cart);
+
+  var cartVal = testSet.classify(cart);
+  var cartCM = cartVal.errorMatrix('class','classification');
+
+  print(year + ' ' + indexName + ' CART OA:', cartCM.accuracy());
+  print(year + ' ' + indexName + ' CART Kappa:', cartCM.kappa());
+
+
+  var rf = ee.Classifier.smileRandomForest(50).train(trainSet, 'class', bands);
+  var rfMap = image.select(bands).classify(rf);
+
+  var rfVal = testSet.classify(rf);
+  var rfCM = rfVal.errorMatrix('class','classification');
+
+  print(year + ' ' + indexName + ' RF OA:', rfCM.accuracy());
+  print(year + ' ' + indexName + ' RF Kappa:', rfCM.kappa());
+
+  
+  var svm = ee.Classifier.libsvm().train(trainSet, 'class', bands);
+  var svmMap = image.select(bands).classify(svm);
+
+  var svmVal = testSet.classify(svm);
+  var svmCM = svmVal.errorMatrix('class','classification');
+
+  print(year + ' ' + indexName + ' SVM OA:', svmCM.accuracy());
+  print(year + ' ' + indexName + ' SVM Kappa:', svmCM.kappa());
+
+
+  var vis = {min:0, max:1, palette:['brown','blue']};
+
+  Map.addLayer(cartMap.clip(roi), vis, year + ' ' + indexName + ' CART');
+  Map.addLayer(rfMap.clip(roi),   vis, year + ' ' + indexName + ' RF');
+  Map.addLayer(svmMap.clip(roi),  vis, year + ' ' + indexName + ' SVM');
+}
+
+runML(ls1993, mndwiClass93, ['SR_B2','SR_B4','SR_B5'], '1993', 'MNDWI');
+runML(ls1993, wiwClass93,   ['SR_B2','SR_B4','SR_B5'], '1993', 'WIW');
+
+runML(ls2023, mndwiClass23, ['SR_B3','SR_B5','SR_B6'], '2023', 'MNDWI');
+runML(ls2023, wiwClass23,   ['SR_B3','SR_B5','SR_B6'], '2023', 'WIW');
