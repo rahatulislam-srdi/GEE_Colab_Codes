@@ -1,317 +1,134 @@
-var table: Table projects/ee-rahat5151/assets/Habiganj_Sadar
-var table2: Table projects/ee-rahat5151/assets/Habiganj_Sadar_River
-var table3: Table projects/ee-rahat5151/assets/Habiganj_Sadar_Roads
-
+var table = ee.FeatureCollection("projects/ee-rahat5151/assets/Habiganj_Sadar"),
+    table2 = ee.FeatureCollection("projects/ee-rahat5151/assets/Habiganj_Sadar_River"),
+    table3 = ee.FeatureCollection("projects/ee-rahat5151/assets/Habiganj_Sadar_Roads");
 
 var roi = table;
 var rivers = table2;
 
 var studyArea = typeof roi !== 'undefined' ? roi : rivers.geometry().bounds();
-
 Map.centerObject(studyArea, 11); 
 
-var rivers = ee.FeatureCollection('projects/ee-rahat5151/assets/Habiganj_Sadar_River')
-  .filterBounds(roi);
 
+var rivers = ee.FeatureCollection('projects/ee-rahat5151/assets/Habiganj_Sadar_River').filterBounds(roi);
 var riverRaster = ee.Image().byte().paint(rivers, 1).clip(roi);
+var riverDist = riverRaster.fastDistanceTransform(30).sqrt().multiply(30).rename('RIVER_DIST').clip(roi);
 
-var riverDist = riverRaster.fastDistanceTransform(30)
-  .sqrt()
-  .multiply(30)
-  .rename('RIVER_DIST')
-  .clip(roi);
-  
-Map.addLayer(riverDist,
-  {min:0,max:5000,palette:['blue','yellow','red']},
-  'RIVER DISTANCE');
 
-var roads = ee.FeatureCollection('projects/ee-rahat5151/assets/Habiganj_Sadar_Roads')
-  .filterBounds(roi);
-
+var roads = ee.FeatureCollection('projects/ee-rahat5151/assets/Habiganj_Sadar_Roads').filterBounds(roi);
 var roadsRaster = ee.Image().byte().paint(roads, 1).clip(roi);
+var roadsDist = roadsRaster.fastDistanceTransform(30).sqrt().multiply(30).rename('ROAD_DIST').clip(roi); // Corrected Name
 
-var roadsDist = roadsRaster.fastDistanceTransform(30)
-  .sqrt()
-  .multiply(30)
-  .rename('RIVER_DIST')
-  .clip(roi);
-  
-Map.addLayer(roadsDist,
-  {min:0,max:5000,palette:['brown','white','green']},
-  'RIVER DISTANCE');
-  
-  var dem = ee.Image('USGS/SRTMGL1_003').clip(roi);
+
+var dem = ee.Image('USGS/SRTMGL1_003').clip(roi);
 var slope = ee.Terrain.slope(dem).rename('SLOPE');
 
 
-Map.addLayer(dem,
-  {min:0,max:30,palette:['white','orange','red']},
-  'DEM');
-
-Map.addLayer(slope,
-  {min:0,max:10,palette:['white','orange','red']},
-  'SLOPE');
-
 function scaleLandsat(img){
   return img.multiply(2.75e-05).add(-0.2);
 }
 
-function scaleLandsat(img){
-  return img.multiply(2.75e-05).add(-0.2);
-}
 
 var ls1993 = ee.ImageCollection("LANDSAT/LT05/C02/T1_L2")
   .filterDate('1993-08-01', '1993-12-31')
   .filterBounds(roi)
   .filter(ee.Filter.lt('CLOUD_COVER', 45))
   .median();
-
 ls1993 = scaleLandsat(ls1993);
 
 var ndvi93 = ls1993.normalizedDifference(['SR_B4', 'SR_B3']).rename('NDVI');
 var ndbi93 = ls1993.normalizedDifference(['SR_B5', 'SR_B4']).rename('NDBI');
-var mndwi93 = ls1993.normalizedDifference(['SR_B2','SR_B5']).rename('MNDWI').clip(roi);
-var wiw93   = ls1993.select('SR_B4').lte(0.1558)
-                  .and(ls1993.select('SR_B5').lte(0.0871))
-                  .rename('WIW').clip(roi);
+var wiw93  = ls1993.select('SR_B4').lte(0.1558).and(ls1993.select('SR_B5').lte(0.0871)).rename('WIW').clip(roi);
+
 
 var ls2023 = ee.ImageCollection("LANDSAT/LC08/C02/T1_L2")
   .filterDate('2023-08-01', '2023-12-31')
   .filterBounds(roi)
   .filter(ee.Filter.lt('CLOUD_COVER', 45))
   .median();
-
 ls2023 = scaleLandsat(ls2023);
+
 var ndvi23 = ls2023.normalizedDifference(['SR_B5', 'SR_B4']).rename('NDVI');
 var ndbi23 = ls2023.normalizedDifference(['SR_B6', 'SR_B5']).rename('NDBI');
-var mndwi23 = ls2023.normalizedDifference(['SR_B3','SR_B6']).rename('MNDWI').clip(roi);
-var wiw23   = ls2023.select('SR_B5').lte(0.1735)
-                  .and(ls2023.select('SR_B6').lte(0.1035))
-                  .rename('WIW').clip(roi);
-                  
+var wiw23  = ls2023.select('SR_B5').lte(0.1735).and(ls2023.select('SR_B6').lte(0.1035)).rename('WIW').clip(roi);
 
 
+var ndviChange = ndvi23.subtract(ndvi93).rename('ndvi_ch').clip(roi);
+var ndbiChange = ndbi23.subtract(ndbi93).rename('ndbi_ch').clip(roi);
+var wiwChange  = wiw23.unmask(0).subtract(wiw93.unmask(0)).rename('wiw_ch').clip(roi);
 
-var wiw2023 =
-    wiw23.unmask(0).clip(roi);
-    
-    print(wiwChange)
-
-var wiwChange =
-    wiw23.unmask(0).subtract(wiw93.unmask(0))
-    .rename('wiw_ch').clip(roi);
-var ndviChange =
-    ndvi23.subtract(ndvi93)
-    .rename('ndvi_ch').clip(roi);
-
-var ndbiChange =
-    ndbi23.subtract(ndbi93)
-    .rename('ndbi_ch').clip(roi);
-
-
-print(wiwChange)
-
-Map.addLayer(wiwChange.updateMask(wiwChange.neq(0)).clip(roi),
-  {min:-1,max:1,palette:['red','green']}, 'WIW Change');
-  Map.addLayer(wiwChange.neq(0),{min:0,max:1,palette:['white','blue']},
-  'wiwChng');
-Map.addLayer(ndviChange, {min:0,max:1,palette:['white','green']},
-  'ndviChng');
-Map.addLayer(ndbiChange, {min:0,max:1,palette:['white','brown']},
-  'ndbiChng');
-
-
-
-var predictors =
-  ndviChange
-  .addBands(wiwChange)
+var predictors = ndviChange
   .addBands(ndbiChange)
   .addBands(dem.rename('dem'))
   .addBands(slope.rename('slope'))
-  .addBands(roadsDist.rename('road_dist'))
-  .addBands(riverDist.rename('river_dist'));
+  .addBands(roadsDist)
+  .addBands(riverDist);
 
 
-
-var wetlandLostBinary = wiw2023.eq(1).rename('lost_class');
+var wetlandLostBinary = wiw23.unmask(0).eq(0).and(wiw93.unmask(0).eq(1)).rename('lost_class');
 
 var trainingPoints = wetlandLostBinary.stratifiedSample({
-  numPoints: 1000,          
-  classBand: 'lost_class',  
+  numPoints: 1000,
+  classBand: 'lost_class',
   region: roi,
-  scale: 30, 
+  scale: 30,
   geometries: true
 });
 
 var trainingData = predictors.sampleRegions({
-  collection: trainingPoints, 
-  properties: ['lost_class'], 
+  collection: trainingPoints,
+  properties: ['lost_class'],
   scale: 30
 });
 
 var withRandom = trainingData.randomColumn('random');
 var trainSet = withRandom.filter(ee.Filter.lt('random', 0.8));
-var testSet = withRandom.filter(ee.Filter.gte('random', 0.8));
+var testSet  = withRandom.filter(ee.Filter.gte('random', 0.8));
+
 
 var rfClassifier = ee.Classifier.smileRandomForest({
-    numberOfTrees: 200 
+    numberOfTrees: 200
 })
-.setOutputMode('PROBABILITY') 
+.setOutputMode('PROBABILITY')
 .train({
-    features: trainSet,        
-    classProperty: 'lost_class', 
-    inputProperties: predictors.bandNames() 
+    features: trainSet,
+    classProperty: 'lost_class',
+    inputProperties: predictors.bandNames()
 });
-
-var risk = predictors.classify(rfClassifier).rename('risk');
-
-var riskVis = {
-  min: 0,
-  max: 1,
-  palette: [
-    '#2166ac', 
-    '#67a9cf', 
-    '#d1e5f0', 
-    '#fddbc7', 
-    '#ef8a62', 
-    '#b2182b'  
-  ]
-};
-
-
-Map.centerObject(roi, 10);
-
-
-Map.addLayer(risk, riskVis, 'Wetland Risk Map (Probability)');
-
-
-var roiOutline = ee.Image().paint({
-  featureCollection: roi,
-  color: 1,
-  width: 2
-});
-Map.addLayer(roiOutline, {palette: ['#000000']}, 'Study Area Boundary');
-
 
 
 
 var explain = rfClassifier.explain();
-var importance = ee.Dictionary(explain.get('importance'));
+var rawImportance = ee.Dictionary(explain.get('importance'));
+var totalSum = rawImportance.values().reduce(ee.Reducer.sum());
 
-
-print('Variable Importance (Raw Weights):', importance);
-
-var keys = importance.keys();
-var values = importance.values();
-
-
-var fc = ee.FeatureCollection(
-  keys.zip(values).map(function(kv){
-    kv = ee.List(kv);
-    return ee.Feature(null, {
-      variable: kv.get(0),
-      importance: kv.get(1)
-    });
-  })
-);
-
-var totalImportance = values.reduce(ee.Reducer.sum());
-
-var normalizedValues = values.map(function(val) {
-  return ee.Number(val).divide(totalImportance).multiply(100);
+var relativeImportance = rawImportance.map(function(key, val) {
+  return ee.Number(val).divide(totalSum).multiply(100);
 });
 
-var fcNormalized = ee.FeatureCollection(
-  keys.zip(normalizedValues).map(function(kv){
+print('Gini Variable Importance (%):', relativeImportance);
+
+var fc = ee.FeatureCollection(
+  relativeImportance.keys().zip(relativeImportance.values()).map(function(kv){
     kv = ee.List(kv);
     return ee.Feature(null, {
-      variable: kv.get(0),
-      importance_pct: kv.get(1)
+      'variable': kv.get(0),
+      'importance_pct': kv.get(1)
     });
   })
 );
 
-var chartPct = ui.Chart.feature.byFeature({
-  features: fcNormalized,
+var chart = ui.Chart.feature.byFeature({
+  features: fc,
   xProperty: 'variable',
   yProperties: ['importance_pct']
 })
 .setChartType('ColumnChart')
 .setOptions({
-  title: 'Variable Importance (Percentage - Total 100%)',
+  title: 'Variable Importance (%) - Gini Method',
   hAxis: {title: 'Predictors'},
-  vAxis: {title: 'Importance (%)', minValue: 0, maxValue: 100},
+  vAxis: {title: 'Importance (%)', minValue: 0},
   legend: {position: 'none'},
-  colors: ['#2b8cbe']
+  colors: ['#d95f02']
 });
 
-print(chartPct);
-
-var importanceDictPct = ee.Dictionary.fromLists(keys, normalizedValues);
-print('Variable Importance (%):', importanceDictPct);
-
-Export.image.toDrive({
-  image: ndviChange,
-  description: 'NDVI_Change',
-  folder: 'GEE_Export',
-  fileNamePrefix: 'ndvi_change',
-  region: roi,
-  scale: 30,
-  maxPixels: 1e13
-});
-
-Export.image.toDrive({
-  image: ndbiChange,
-  description: 'NDBI_Change',
-  folder: 'GEE_Export',
-  fileNamePrefix: 'ndbi_change',
-  region: roi,
-  scale: 30,
-  maxPixels: 1e13
-});
-
-Export.image.toDrive({
-  image: riverDist,
-  description: 'River_Distance',
-  folder: 'GEE_Export',
-  fileNamePrefix: 'river_distance',
-  region: roi,
-  scale: 30,
-  maxPixels: 1e13
-});
-
-Export.image.toDrive({
-  image: roadsDist,
-  description: 'Road_Distance',
-  folder: 'GEE_Export',
-  fileNamePrefix: 'road_distance',
-  region: roi,
-  scale: 30,
-  maxPixels: 1e13
-});
-
-Export.image.toDrive({
-  image: dem,
-  description: 'DEM_Habiganj',
-  region: roi,
-  scale: 30,
-  maxPixels: 1e13
-});
-
-Export.image.toDrive({
-  image: slope,
-  description: 'Slope_Habiganj',
-  region: roi,
-  scale: 30,
-  maxPixels: 1e13
-});
-
-Export.image.toDrive({
-  image: wiwChange,
-  description: 'WIW_Change_Map',
-  folder: 'GEE_Export',
-  fileNamePrefix: 'wiw_change',
-  region: roi,
-  scale: 30,
-  maxPixels: 1e13
-});
+print(chart);
